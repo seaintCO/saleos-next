@@ -1,32 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type CalendarItem = {
   id: string;
+  created_at?: string;
   title: string;
   date: string;
   type: "Goal" | "Objective" | "Task" | "IDS Follow-Up" | "Meeting";
-  notes: string;
+  notes: string | null;
   status: "Open" | "In Progress" | "Done";
 };
 
-const storageKey = "salesos_calendar_items";
-
-const starterItems: CalendarItem[] = [
-  {
-    id: "starter-1",
-    title: "Finalize SalesOS MVP",
-    date: new Date().toISOString().slice(0, 10),
-    type: "Objective",
-    notes:
-      "Stabilize dashboard, offer builder, calendar, IDS flow, and internal team workflow.",
-    status: "In Progress",
-  },
-];
-
 export default function CalendarTasksPage() {
-  const [items, setItems] = useState<CalendarItem[]>(starterItems);
+  const [items, setItems] = useState<CalendarItem[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const [form, setForm] = useState({
     title: "",
@@ -36,26 +25,33 @@ export default function CalendarTasksPage() {
     status: "Open" as CalendarItem["status"],
   });
 
-  useEffect(() => {
-    const saved = localStorage.getItem(storageKey);
+  async function loadItems() {
+    setLoading(true);
 
-    if (saved) {
-      setItems(JSON.parse(saved));
+    const { data, error } = await supabase
+      .from("calendar_tasks")
+      .select("*")
+      .order("date", { ascending: true })
+      .order("created_at", { ascending: false });
+
+    setLoading(false);
+
+    if (error) {
+      alert("Calendar load error: " + error.message);
+      return;
     }
-  }, []);
+
+    setItems((data || []) as CalendarItem[]);
+  }
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(items));
-  }, [items]);
+    loadItems();
+  }, []);
 
   const grouped = useMemo(() => {
     return items.reduce<Record<string, CalendarItem[]>>((acc, item) => {
-      if (!acc[item.date]) {
-        acc[item.date] = [];
-      }
-
+      if (!acc[item.date]) acc[item.date] = [];
       acc[item.date].push(item);
-
       return acc;
     }, {});
   }, [items]);
@@ -73,11 +69,16 @@ export default function CalendarTasksPage() {
       "ALMA recommends keeping every task tied to an owner, deadline, and clear outcome.";
 
     if (open > 0) {
-      message = `You have ${open} open execution items. Prioritize IDS follow-ups first, then complete the highest revenue-impacting objectives.`;
+      message = `You have ${open} open execution item(s). Prioritize IDS follow-ups first, then complete the highest revenue-impacting objectives.`;
     }
 
     if (todayItems > 0) {
       message = `${message} You also have ${todayItems} item(s) scheduled for today.`;
+    }
+
+    if (open === 0 && done > 0) {
+      message =
+        "All execution items are currently completed. ALMA recommends adding your next revenue-driving objectives before the end of the day.";
     }
 
     return {
@@ -89,17 +90,13 @@ export default function CalendarTasksPage() {
     };
   }, [items]);
 
-  function addItem(e: React.FormEvent) {
+  async function addItem(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!form.title.trim()) {
-      return;
-    }
+    if (!form.title.trim()) return;
 
-    setItems([
-      ...items,
+    const { error } = await supabase.from("calendar_tasks").insert([
       {
-        id: crypto.randomUUID(),
         title: form.title,
         date: form.date,
         type: form.type,
@@ -108,6 +105,11 @@ export default function CalendarTasksPage() {
       },
     ]);
 
+    if (error) {
+      alert("Calendar save error: " + error.message);
+      return;
+    }
+
     setForm({
       title: "",
       date: new Date().toISOString().slice(0, 10),
@@ -115,27 +117,50 @@ export default function CalendarTasksPage() {
       notes: "",
       status: "Open",
     });
+
+    await loadItems();
   }
 
-  function updateStatus(id: string, status: CalendarItem["status"]) {
-    setItems(
-      items.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status,
-            }
-          : item
-      )
-    );
+  async function updateStatus(id: string, status: CalendarItem["status"]) {
+    const { error } = await supabase
+      .from("calendar_tasks")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) {
+      alert("Status update error: " + error.message);
+      return;
+    }
+
+    await loadItems();
   }
 
-  function deleteItem(id: string) {
-    setItems(items.filter((item) => item.id !== id));
+  async function deleteItem(id: string) {
+    const { error } = await supabase
+      .from("calendar_tasks")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("Delete error: " + error.message);
+      return;
+    }
+
+    await loadItems();
   }
 
-  function clearDone() {
-    setItems(items.filter((item) => item.status !== "Done"));
+  async function clearDone() {
+    const { error } = await supabase
+      .from("calendar_tasks")
+      .delete()
+      .eq("status", "Done");
+
+    if (error) {
+      alert("Clear completed error: " + error.message);
+      return;
+    }
+
+    await loadItems();
   }
 
   return (
@@ -147,7 +172,7 @@ export default function CalendarTasksPage() {
 
         <p className="text-zinc-500 mt-2 max-w-3xl">
           Track meetings, goals, objectives, tasks, and IDS follow-ups. Items
-          added from IDS Meeting automatically appear here.
+          now save directly into Supabase.
         </p>
       </div>
 
@@ -165,12 +190,21 @@ export default function CalendarTasksPage() {
                 </p>
               </div>
 
-              <button
-                onClick={clearDone}
-                className="bg-zinc-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-semibold hover:bg-zinc-800 transition"
-              >
-                Clear Completed
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={loadItems}
+                  className="bg-zinc-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-semibold hover:bg-zinc-800 transition"
+                >
+                  Refresh
+                </button>
+
+                <button
+                  onClick={clearDone}
+                  className="bg-zinc-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-semibold hover:bg-zinc-800 transition"
+                >
+                  Clear Completed
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -203,7 +237,11 @@ export default function CalendarTasksPage() {
               </div>
             </div>
 
-            {sortedDates.length === 0 ? (
+            {loading ? (
+              <div className="border border-white/10 rounded-3xl p-8 bg-black/30 text-zinc-500 text-sm">
+                Loading calendar...
+              </div>
+            ) : sortedDates.length === 0 ? (
               <div className="border border-white/10 rounded-3xl p-8 bg-black/30 text-zinc-500 text-sm">
                 No calendar items yet.
               </div>
@@ -215,9 +253,7 @@ export default function CalendarTasksPage() {
                     className="border border-white/10 rounded-3xl p-5 bg-black/30"
                   >
                     <div className="flex items-center justify-between mb-4">
-                      <p className="text-sm text-zinc-500">
-                        {date}
-                      </p>
+                      <p className="text-sm text-zinc-500">{date}</p>
 
                       <p className="text-xs text-zinc-600">
                         {grouped[date].length} item(s)
@@ -305,10 +341,7 @@ export default function CalendarTasksPage() {
               Add tasks, goals, objectives, meetings, or manual IDS follow-ups.
             </p>
 
-            <form
-              onSubmit={addItem}
-              className="space-y-4 mt-6"
-            >
+            <form onSubmit={addItem} className="space-y-4 mt-6">
               <input
                 className="soft-input"
                 placeholder="Title"
@@ -389,7 +422,7 @@ export default function CalendarTasksPage() {
             </h2>
 
             <p className="text-sm text-zinc-500 mt-1">
-              Execution intelligence based on current tasks.
+              Execution intelligence based on current Supabase tasks.
             </p>
 
             <div className="mt-5 border border-white/10 rounded-2xl p-5 bg-black/30">

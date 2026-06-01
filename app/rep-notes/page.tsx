@@ -1,101 +1,135 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type Note = {
   id: string;
-  text: string;
-  rep: string;
-  createdAt: string;
+  created_at: string;
+  client_id: string | null;
+  rep_name: string | null;
+  note: string;
+  type: string | null;
 };
 
-export default function Page() {
+export default function RepNotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
-  const [text, setText] = useState("");
-  const [rep, setRep] = useState("");
+  const [repName, setRepName] = useState("");
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function loadNotes() {
+    const { data, error } = await supabase
+      .from("rep_notes")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      alert("Load error: " + error.message);
+      return;
+    }
+
+    setNotes(data || []);
+  }
+
+  async function addNote() {
+    if (!note.trim()) return;
+
+    setLoading(true);
+
+    const { error } = await supabase.from("rep_notes").insert([
+      {
+        rep_name: repName || "Admin",
+        note,
+        type: "manual",
+      },
+    ]);
+
+    setLoading(false);
+
+    if (error) {
+      alert("Save error: " + error.message);
+      return;
+    }
+
+    setRepName("");
+    setNote("");
+    await loadNotes();
+  }
+
+  async function deleteNote(id: string) {
+    const { error } = await supabase
+      .from("rep_notes")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("Delete error: " + error.message);
+      return;
+    }
+
+    await loadNotes();
+  }
 
   useEffect(() => {
-    const saved = localStorage.getItem("salesos_rep_notes");
-    if (saved) setNotes(JSON.parse(saved));
+    loadNotes();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("salesos_rep_notes", JSON.stringify(notes));
-  }, [notes]);
-
-  const addNote = () => {
-    if (!text.trim()) return;
-
-    const newNote: Note = {
-      id: Date.now().toString(),
-      text,
-      rep: rep || "Sales Rep",
-      createdAt: new Date().toLocaleString(),
-    };
-
-    setNotes([newNote, ...notes]);
-    setText("");
-    setRep("");
-  };
-
-  const deleteNote = (id: string) => {
-    setNotes(notes.filter((note) => note.id !== id));
-  };
-
   return (
-    <div className="min-h-screen text-white">
+    <div className="min-h-screen bg-black text-white px-8 py-10">
       <div className="mb-10">
-        <div className="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-950/70 rounded-full px-4 py-2 text-xs text-zinc-400 mb-5">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-4 py-2 text-xs text-zinc-400">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
           SALESOS MODULE
         </div>
 
-        <h1 className="text-5xl font-semibold tracking-tight">Rep Notes</h1>
+        <h1 className="mt-6 text-5xl font-bold tracking-tight">
+          Rep Notes
+        </h1>
 
-        <p className="text-zinc-500 mt-3 max-w-2xl text-sm leading-relaxed">
+        <p className="mt-3 text-zinc-500">
           Sales rep notes, objections, lead updates, and internal follow-up context.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="glass-card rounded-3xl p-7 xl:col-span-2">
-          <h2 className="text-2xl font-semibold">Notes Feed</h2>
-
-          <p className="text-sm text-zinc-500 mt-2">
-            Live rep notes saved on this device.
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-7 lg:col-span-2">
+          <h2 className="text-2xl font-bold">Notes Feed</h2>
+          <p className="mt-2 text-sm text-zinc-500">
+            Live rep notes saved to Supabase.
           </p>
 
           <div className="mt-8 space-y-4">
             {notes.length === 0 ? (
-              <div className="border border-zinc-800 rounded-3xl p-6 bg-black/30">
-                <p className="text-sm text-zinc-400">Module status</p>
-                <h3 className="text-4xl font-semibold mt-3">Ready</h3>
-                <p className="text-zinc-500 text-sm mt-3">
-                  No notes yet. Add the first rep note from the right side.
-                </p>
+              <div className="rounded-2xl border border-zinc-800 bg-black/40 p-6 text-zinc-500">
+                No notes yet.
               </div>
             ) : (
-              notes.map((note) => (
+              notes.map((item) => (
                 <div
-                  key={note.id}
-                  className="border border-zinc-800 rounded-3xl p-5 bg-black/30"
+                  key={item.id}
+                  className="rounded-2xl border border-zinc-800 bg-black/40 p-5"
                 >
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start justify-between">
                     <div>
-                      <p className="text-sm text-zinc-400">{note.rep}</p>
-                      <p className="text-xs text-zinc-600 mt-1">{note.createdAt}</p>
+                      <p className="font-semibold">
+                        {item.rep_name || "Admin"}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {new Date(item.created_at).toLocaleString()}
+                      </p>
                     </div>
 
                     <button
-                      onClick={() => deleteNote(note.id)}
+                      onClick={() => deleteNote(item.id)}
                       className="text-xs text-red-400 hover:text-red-300"
                     >
                       Delete
                     </button>
                   </div>
 
-                  <p className="text-zinc-200 mt-4 text-sm leading-relaxed whitespace-pre-wrap">
-                    {note.text}
+                  <p className="mt-5 text-sm text-zinc-200">
+                    {item.note}
                   </p>
                 </div>
               ))
@@ -103,37 +137,38 @@ export default function Page() {
           </div>
         </div>
 
-        <div className="glass-card rounded-3xl p-7">
-          <h2 className="text-2xl font-semibold">Quick Actions</h2>
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-7">
+          <h2 className="text-2xl font-bold">Quick Actions</h2>
 
-          <div className="space-y-4 mt-6">
+          <div className="mt-8 space-y-4">
             <input
-              value={rep}
-              onChange={(e) => setRep(e.target.value)}
+              value={repName}
+              onChange={(e) => setRepName(e.target.value)}
               placeholder="Rep name"
-              className="w-full bg-black/40 border border-zinc-800 rounded-2xl px-4 py-3 text-sm outline-none focus:border-white/40"
+              className="w-full rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/40"
             />
 
             <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
               placeholder="Write note, objection, lead update, or follow-up..."
               rows={6}
-              className="w-full bg-black/40 border border-zinc-800 rounded-2xl px-4 py-3 text-sm outline-none focus:border-white/40 resize-none"
+              className="w-full resize-none rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/40"
             />
 
             <button
               onClick={addNote}
-              className="w-full bg-white text-black rounded-2xl py-3 text-sm font-semibold hover:bg-zinc-200 transition"
+              disabled={loading}
+              className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-50"
             >
-              Add Entry
+              {loading ? "Saving..." : "Add Entry"}
             </button>
 
             <button
-              onClick={() => alert(JSON.stringify(notes, null, 2))}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 text-sm font-semibold hover:bg-zinc-900 transition"
+              onClick={loadNotes}
+              className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 py-3 text-sm font-semibold transition hover:bg-zinc-900"
             >
-              Export
+              Refresh
             </button>
           </div>
         </div>
